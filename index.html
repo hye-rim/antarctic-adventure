@@ -17,33 +17,38 @@ const W = 640, H = 480, HOR = 170, GY = 400, K = 0.06;
 const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); if (e.code === 'Space') press(); });
 addEventListener('keyup', e => keys[e.code] = false);
-// --- 터치 컨트롤: 화면 버튼 (멀티터치 지원) ---
-const BTN = {
-  left:  { x: 16,  y: 384, w: 84, h: 84, label: '◀', key: 'TouchLeft' },
-  right: { x: 110, y: 384, w: 84, h: 84, label: '▶', key: 'TouchRight' },
-  jump:  { x: 110, y: 288, w: 84, h: 84, label: 'JUMP', key: null },
-};
-let touchUI = false;
-const touches = new Map();
+// --- 터치 컨트롤: 드래그로 이동, 탭/위로 스와이프로 점프 ---
+let touchUI = navigator.maxTouchPoints > 0;
+let touchPx = null; // 드래그 중 목표 px (null이면 드래그 없음)
+const DRAG_SCALE = 200;   // 이 거리(캔버스 px)를 끌면 좌우 끝까지 이동
+const FLICK_DIST = 45;    // 위로 이만큼 스와이프하면 점프
+const TAP_MAX_MOVE = 18, TAP_MAX_MS = 300; // 탭으로 인정할 조건
+let dragId = null, dragStartX = 0, dragStartY = 0, dragStartPx = 0, dragStartT = 0, dragJumped = false;
 function canvasPt(e) {
   const r = cv.getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
 }
-function inBtn(b, p) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
-function syncTouchKeys() {
-  for (const b of Object.values(BTN)) if (b.key) keys[b.key] = [...touches.values()].some(p => inBtn(b, p));
-}
 cv.addEventListener('pointerdown', e => {
   e.preventDefault(); touchUI = touchUI || e.pointerType === 'touch';
   initAudio();
+  if (state !== 'play') { press(); return; }
+  if (dragId !== null) { press(); return; } // 두 번째 손가락 = 점프
   const p = canvasPt(e);
-  touches.set(e.pointerId, p); syncTouchKeys();
-  if (state !== 'play' || inBtn(BTN.jump, p)) press();
-  else if (![BTN.left, BTN.right].some(b => inBtn(b, p))) press(); // 빈 곳 탭도 점프
+  dragId = e.pointerId; dragStartX = p.x; dragStartY = p.y; dragStartPx = px; dragStartT = performance.now(); dragJumped = false;
 });
-cv.addEventListener('pointermove', e => { if (touches.has(e.pointerId)) { touches.set(e.pointerId, canvasPt(e)); syncTouchKeys(); } });
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) cv.addEventListener(ev, e => { touches.delete(e.pointerId); syncTouchKeys(); });
-if (navigator.maxTouchPoints > 0) touchUI = true;
+cv.addEventListener('pointermove', e => {
+  if (e.pointerId !== dragId) return;
+  const p = canvasPt(e), dx = p.x - dragStartX, dy = p.y - dragStartY;
+  touchPx = Math.max(-1, Math.min(1, dragStartPx + dx / DRAG_SCALE));
+  if (!dragJumped && dy < -FLICK_DIST) { press(); dragJumped = true; }
+});
+function endDrag(e) {
+  if (e.pointerId !== dragId) return;
+  const p = canvasPt(e), dx = p.x - dragStartX, dy = p.y - dragStartY, dt = performance.now() - dragStartT;
+  if (!dragJumped && Math.abs(dx) < TAP_MAX_MOVE && Math.abs(dy) < TAP_MAX_MOVE && dt < TAP_MAX_MS) press();
+  dragId = null; touchPx = null;
+}
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) cv.addEventListener(ev, endDrag);
 
 // --- audio (WebAudio 합성, 외부 파일 없음) ---
 let AC = null, master = null, muted = false;
@@ -94,10 +99,10 @@ function bgmTick(active) {
 addEventListener('keydown', e => { if (e.code === 'KeyM') muted = !muted; initAudio(); });
 
 let state = 'title', stage = 1, score = 0, lives = 3;
-let dist, speed, px, jy, jv, time, goal, objs, hitT, msgT, msg, flash;
+let dist, speed, px, jy, jv, time, goal, objs, hitT, msgT, msg, flash, hintT;
 
 function startStage() {
-  dist = 0; speed = 0; px = 0; jy = 0; jv = 0; hitT = 0; flash = 0;
+  dist = 0; speed = 0; px = 0; jy = 0; jv = 0; hitT = 0; flash = 0; hintT = stage === 1 ? 4 : 0;
   goal = 1200 + stage * 300;
   time = 45 + stage * 5;
   objs = [];
@@ -126,8 +131,12 @@ function update(dt) {
   if (keys.ArrowUp) speed += 30 * dt; else if (keys.ArrowDown) speed -= 45 * dt; else speed += 8 * dt;
   speed = Math.max(12, Math.min(maxV, speed));
   if (hitT > 0) { hitT -= dt; speed = Math.min(speed, 12); }
-  const steer = (keys.ArrowRight || keys.TouchRight ? 1 : 0) - (keys.ArrowLeft || keys.TouchLeft ? 1 : 0);
-  px = Math.max(-1, Math.min(1, px + steer * 1.4 * dt));
+  if (touchPx !== null) {
+    px += (touchPx - px) * Math.min(1, dt * 16); // 드래그 목표로 부드럽게 추적
+  } else {
+    const steer = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
+    px = Math.max(-1, Math.min(1, px + steer * 1.4 * dt));
+  }
   if (jy > 0 || jv > 0) { jy += jv * dt; jv -= 24 * dt; if (jy <= 0) { jy = 0; jv = 0; } }
   dist += speed * dt;
 
@@ -140,6 +149,7 @@ function update(dt) {
       if (lives <= 0) { state = 'over'; sfx.over(); return; } }
   }
   if (msgT > 0) msgT -= dt;
+  if (hintT > 0) hintT -= dt;
   if (time <= 0) { lives--; flash = 0.5; if (lives <= 0) { state = 'over'; sfx.over(); } else { sfx.life(); startStage(); } }
   else if (dist >= goal) { score += Math.floor(time) * 50 + 1000; state = 'clear'; sfx.clear(); }
 }
@@ -236,7 +246,7 @@ function draw() {
     text('스페이스 / 클릭으로 시작', W / 2, 230, 22);
     text('← → 이동   ↑ 가속   ↓ 감속   SPACE 점프', W / 2, 270, 16, '#ddd');
     text('M: 소리 켜기/끄기', W / 2, 295, 16, '#ddd');
-    text('📱 터치: 화면 버튼으로 조작', W / 2, 320, 16, '#ddd');
+    text('📱 터치: 드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, 320, 16, '#ddd');
     return;
   }
   drawBg(); drawStation();
@@ -253,13 +263,11 @@ function draw() {
   ctx.fillStyle = '#ffe066'; ctx.fillRect(W / 2 - 100, 12, 200 * Math.min(1, dist / goal), 8);
   if (msgT > 0) text(msg, W / 2, 140, 28, '#ffe066');
   if (touchUI && state === 'play') {
-    for (const b of Object.values(BTN)) {
-      const on = b.key && keys[b.key];
-      ctx.fillStyle = on ? 'rgba(255,224,102,.55)' : 'rgba(0,0,0,.28)';
-      ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 16); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.stroke();
-      text(b.label, b.x + b.w / 2, b.y + b.h / 2 + (b.label.length > 1 ? 8 : 12), b.label.length > 1 ? 22 : 34);
+    if (dragId !== null) { // 드래그 중인 손가락 위치 표시
+      ctx.strokeStyle = 'rgba(255,224,102,.85)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(sx(touchPx ?? px, 1), GY + 20, 20, 0, 7); ctx.stroke();
     }
+    if (hintT > 0) { ctx.globalAlpha = Math.min(1, hintT); text('드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, H - 16, 16, '#fff'); ctx.globalAlpha = 1; }
   }
   if (state === 'clear') { text('기지 도착!', W / 2, 200, 48, '#ffe066'); text(`시간 보너스 ${Math.floor(time) * 50}  +1000`, W / 2, 245, 20); text('스페이스: 다음 스테이지', W / 2, 290, 20); }
   if (state === 'over') { text('GAME OVER', W / 2, 220, 56, '#ff6b6b'); text(`SCORE ${score}`, W / 2, 265, 24); text('스페이스: 타이틀로', W / 2, 305, 20); }
