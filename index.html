@@ -21,8 +21,7 @@ addEventListener('keyup', e => keys[e.code] = false);
 const BTN = {
   left:  { x: 16,  y: 384, w: 84, h: 84, label: '◀', key: 'TouchLeft' },
   right: { x: 110, y: 384, w: 84, h: 84, label: '▶', key: 'TouchRight' },
-  up:    { x: 416, y: 392, w: 96, h: 76, label: '▲', key: 'TouchUp' },
-  jump:  { x: 522, y: 372, w: 108, h: 96, label: 'JUMP', key: null },
+  jump:  { x: 110, y: 288, w: 84, h: 84, label: 'JUMP', key: null },
 };
 let touchUI = false;
 const touches = new Map();
@@ -40,7 +39,7 @@ cv.addEventListener('pointerdown', e => {
   const p = canvasPt(e);
   touches.set(e.pointerId, p); syncTouchKeys();
   if (state !== 'play' || inBtn(BTN.jump, p)) press();
-  else if (![BTN.left, BTN.right, BTN.up].some(b => inBtn(b, p))) press(); // 빈 곳 탭도 점프
+  else if (![BTN.left, BTN.right].some(b => inBtn(b, p))) press(); // 빈 곳 탭도 점프
 });
 cv.addEventListener('pointermove', e => { if (touches.has(e.pointerId)) { touches.set(e.pointerId, canvasPt(e)); syncTouchKeys(); } });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) cv.addEventListener(ev, e => { touches.delete(e.pointerId); syncTouchKeys(); });
@@ -124,7 +123,7 @@ function update(dt) {
   time -= dt;
   if (time < 10 && Math.ceil(time) < prevSec && time > 0) sfx.tick();
   const maxV = 55 + stage * 3;
-  if (keys.ArrowUp || keys.TouchUp) speed += 30 * dt; else if (keys.ArrowDown) speed -= 45 * dt; else speed += 8 * dt;
+  if (keys.ArrowUp) speed += 30 * dt; else if (keys.ArrowDown) speed -= 45 * dt; else speed += 8 * dt;
   speed = Math.max(12, Math.min(maxV, speed));
   if (hitT > 0) { hitT -= dt; speed = Math.min(speed, 12); }
   const steer = (keys.ArrowRight || keys.TouchRight ? 1 : 0) - (keys.ArrowLeft || keys.TouchLeft ? 1 : 0);
