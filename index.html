@@ -114,6 +114,15 @@ function bgmTick(active) {
 addEventListener('keydown', e => { if (e.code === 'KeyM') muted = !muted; initAudio(); });
 
 let state = 'title', stage = 1, score = 0, lives = 3;
+// 최고 점수: 로비 카드와 '내 기록' 요약이 읽는다 (새 기록이 나오는 순간 바로 저장해서 중간에 나가도 남는다)
+const BEST_KEY = 'antarcticBest';
+let best = 0;
+try { best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch (_) {}
+function saveBest() {
+  if (score <= best) return;
+  best = score;
+  try { localStorage.setItem(BEST_KEY, String(best)); } catch (_) {}
+}
 let dist, speed, px, jy, jv, time, goal, objs, hitT, msgT, msg, flash, hintT;
 
 function startStage() {
@@ -415,12 +424,12 @@ function draw() {
     if (state === 'clear') {
       text('기지 도착!', W / 2, 192, 44, '#ffd23f');
       text(`시간 보너스 ${Math.floor(time) * 50} + 1000`, W / 2, 240, 20, INK, 'center', null);
-      text(`점수 ${score.toLocaleString()}`, W / 2, 270, 18, '#6b5c95', 'center', null);
+      text(`점수 ${score.toLocaleString()}  ·  최고 ${best.toLocaleString()}`, W / 2, 270, 18, '#6b5c95', 'center', null);
       text('스페이스 · 탭: 다음 스테이지', W / 2, 310, 17, '#6b5c95', 'center', null);
     } else {
       text('GAME OVER', W / 2, 192, 46, '#ff5fa2');
       text(`점수 ${score.toLocaleString()}`, W / 2, 245, 26, INK, 'center', null);
-      text(`${stage} 스테이지까지`, W / 2, 277, 17, '#6b5c95', 'center', null);
+      text(score > 0 && score >= best ? '🏆 최고 기록!' : `최고 기록 ${best.toLocaleString()}`, W / 2, 277, 17, '#ff5fa2', 'center', null);
       text('스페이스 · 탭: 처음으로', W / 2, 310, 17, '#6b5c95', 'center', null);
     }
   }
@@ -429,7 +438,7 @@ function draw() {
 let last = performance.now();
 (function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); draw(); requestAnimationFrame(loop);
+  update(dt); saveBest(); draw(); requestAnimationFrame(loop);
 })(last);
 </script>
 </body>
