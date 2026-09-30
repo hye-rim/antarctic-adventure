@@ -30,7 +30,12 @@ const W = 640, H = 480, HOR = 170, GY = 400, K = 0.06;
 const DPR = Math.min(2, window.devicePixelRatio || 1);
 cv.width = W * DPR; cv.height = H * DPR; ctx.scale(DPR, DPR);
 const keys = {};
-addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); if (e.code === 'Space') press(); });
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code === 'Space') press();
+  if (e.code === 'KeyP' || e.code === 'Escape') state === 'pause' ? resume() : pause();
+});
 addEventListener('keyup', e => keys[e.code] = false);
 // --- 터치 컨트롤: 드래그로 이동, 탭/위로 스와이프로 점프 ---
 let touchUI = navigator.maxTouchPoints > 0;
@@ -43,9 +48,13 @@ function canvasPt(e) {
   const r = cv.getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
 }
+// 오른쪽 위 일시정지 버튼 (캔버스 좌표. 폰에서 누르기 쉽게 그림보다 넓게 받는다)
+const PAUSE_BTN = { x: W - 164, y: 10, w: 38, h: 30 };
+const onPauseBtn = (p) => p.x > PAUSE_BTN.x - 14 && p.x < PAUSE_BTN.x + PAUSE_BTN.w + 8 && p.y < PAUSE_BTN.y + PAUSE_BTN.h + 24;
 cv.addEventListener('pointerdown', e => {
   e.preventDefault(); touchUI = touchUI || e.pointerType === 'touch';
   initAudio();
+  if (state === 'play' && onPauseBtn(canvasPt(e))) { pause(); return; }
   if (state !== 'play') { press(); return; }
   if (dragId !== null) { press(); return; } // 두 번째 손가락 = 점프
   const p = canvasPt(e);
@@ -137,8 +146,18 @@ function startStage() {
   }
   state = 'play';
 }
+// 일시정지: 버튼·P·Esc, 다른 앱이나 탭으로 가면 저절로. 탭·스페이스로 이어서
+function pause() {
+  if (state !== 'play') return;
+  state = 'pause'; dragId = null; touchPx = null;
+  for (const k in keys) keys[k] = false;
+}
+function resume() { if (state === 'pause') { state = 'play'; last = performance.now(); } }
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+addEventListener('blur', pause);
 function press() {
   initAudio();
+  if (state === 'pause') { resume(); return; }
   if (state === 'title') { stage = 1; score = 0; lives = 3; startStage(); }
   else if (state === 'over') state = 'title';
   else if (state === 'clear') { stage++; startStage(); }
@@ -370,6 +389,8 @@ function hud() {
   panel(W / 2 - 110, 12, 220, 18, 9, '#ffffff', 3);
   ctx.fillStyle = '#3fa9ff'; roundRect(W / 2 - 107, 15, Math.max(12, 214 * Math.min(1, dist / goal)), 12, 6); ctx.fill();
   emoji('🏠', W / 2 + 122, 20, 18);
+  panel(PAUSE_BTN.x, PAUSE_BTN.y, PAUSE_BTN.w, PAUSE_BTN.h, 12, '#ffffff', 3);
+  text(state === 'pause' ? '▶' : 'Ⅱ', PAUSE_BTN.x + PAUSE_BTN.w / 2, PAUSE_BTN.y + PAUSE_BTN.h / 2, 16, INK, 'center', null);
   text(`${Math.max(0, Math.ceil(goal - dist))}m`, W / 2, 44, 16, '#fff');
 }
 
@@ -390,7 +411,7 @@ function draw() {
     ctx.fillStyle = INK;
     text('펭귄과 함께 남극 기지까지 달려요!', W / 2, 218, 19, INK, 'center', null);
     text('크레바스와 바다표범은 점프로 피하고 🚩 깃발은 모으기', W / 2, 246, 15, '#6b5c95', 'center', null);
-    text('⌨️ ← → 이동 · ↑ 가속 · ↓ 감속 · SPACE 점프 · M 소리', W / 2, 276, 14, '#6b5c95', 'center', null);
+    text('⌨️ ← → 이동 · ↑ 가속 · ↓ 감속 · SPACE 점프 · P 멈춤 · M 소리', W / 2, 276, 13, '#6b5c95', 'center', null);
     text('📱 드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, 300, 14, '#6b5c95', 'center', null);
     const s = 1 + Math.sin(performance.now() / 200) * 0.03;
     ctx.save(); ctx.translate(W / 2, 344); ctx.scale(s, s);
@@ -417,6 +438,12 @@ function draw() {
       ctx.lineWidth = 3; ctx.strokeStyle = '#ffd23f'; ctx.stroke();
     }
     if (hintT > 0) { ctx.globalAlpha = Math.min(1, hintT); text('드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, H - 18, 17, '#fff'); ctx.globalAlpha = 1; }
+  }
+  if (state === 'pause') {
+    ctx.fillStyle = 'rgba(43,29,82,.45)'; ctx.fillRect(0, 0, W, H);
+    card(170, 130);
+    text('일시정지', W / 2, 215, 44, '#ffd23f');
+    text('스페이스 · 탭: 계속하기', W / 2, 265, 18, '#6b5c95', 'center', null);
   }
   if (state === 'clear' || state === 'over') {
     ctx.fillStyle = 'rgba(43,29,82,.45)'; ctx.fillRect(0, 0, W, H);
