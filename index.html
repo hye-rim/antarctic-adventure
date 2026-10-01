@@ -19,10 +19,17 @@
                linear-gradient(180deg, #4f8cff 0%, #6b5cff 55%, #8a4fe0 100%)}
   canvas{width:min(calc(100vw - 28px),calc((100vh - 36px)*4/3));border-radius:20px;touch-action:none;
     box-shadow:0 0 0 4px #2b1d52, 0 9px 0 4px #2b1d52, 0 22px 40px rgba(0,0,0,.35)}
+  /* 폰을 세로로 들면 가로로 넓은 이 게임의 판이 작아진다: 돌리면 크게 보인다고 알려 준다 (게임 중에는 숨김) */
+  #rotateHint{position:fixed;left:50%;transform:translateX(-50%);display:none;white-space:nowrap;
+    font:400 16px 'Jua',-apple-system,'Apple SD Gothic Neo',sans-serif;color:#2b1d52;background:#ffd23f;
+    border:3px solid #2b1d52;border-radius:999px;box-shadow:0 4px 0 #2b1d52;padding:5px 16px;pointer-events:none}
+  #rotateHint i{display:inline-block;font-style:normal;animation:rot 1.8s ease-in-out infinite}
+  @keyframes rot{0%,25%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
 </style>
 </head>
 <body>
 <canvas id="c" width="640" height="480"></canvas>
+<div id="rotateHint"><i>📱</i> 폰을 가로로 돌리면 더 크게 보여요</div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const W = 640, H = 480, HOR = 170, GY = 400, K = 0.06;
@@ -398,7 +405,17 @@ function hud() {
 
 function card(y, h) { panel(W / 2 - 190, y, 380, h, 24, '#ffffff', 6); }
 
+// 세로로 든 폰에서 게임 밖(시작·멈춤·결과 화면)일 때만 '가로로 돌리세요' 안내를 판 아래에 띄운다
+const rotateHint = document.getElementById('rotateHint');
+function updateRotateHint() {
+  const portrait = innerHeight > innerWidth;
+  const show = TOUCH && portrait && state !== 'play';
+  if (show) { rotateHint.style.top = (cv.getBoundingClientRect().bottom + 26) + 'px'; }
+  if ((rotateHint.style.display === 'block') !== show) rotateHint.style.display = show ? 'block' : 'none';
+}
+
 function draw() {
+  updateRotateHint();
   if (state === 'title') {
     // 하늘·빙산 + 얼음 위 펭귄, 가운데 안내 카드
     drawSky(Math.sin(performance.now() / 3000) * 0.5);
