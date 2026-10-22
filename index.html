@@ -30,7 +30,10 @@
 <body>
 <canvas id="c" width="640" height="480"></canvas>
 <div id="rotateHint"><i>📱</i> 폰을 가로로 돌리면 더 크게 보여요</div>
+<script src="logic.js"></script>
 <script>
+// 규칙(판·달리기·점프·충돌·시간·목숨)은 logic.js 의 LOGIC_ANTARCTIC. 여기서는 그리기·소리·입력만
+const L = LOGIC_ANTARCTIC;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const W = 640, H = 480, HOR = 170, GY = 400, K = 0.06;
 // 화면 배율만큼 크게 그려 선명하게
@@ -67,7 +70,7 @@ cv.addEventListener('pointerdown', e => {
   if (state !== 'play') { press(); return; }
   if (dragId !== null) { press(); return; } // 두 번째 손가락 = 점프
   const p = canvasPt(e);
-  dragId = e.pointerId; dragStartX = p.x; dragStartY = p.y; dragStartPx = px; dragStartT = performance.now(); dragJumped = false;
+  dragId = e.pointerId; dragStartX = p.x; dragStartY = p.y; dragStartPx = G.px; dragStartT = performance.now(); dragJumped = false;
 });
 cv.addEventListener('pointermove', e => {
   if (e.pointerId !== dragId) return;
@@ -121,7 +124,7 @@ let bgmStep = 0, bgmNext = 0;
 function bgmTick(active) {
   if (!AC || muted || !active) { bgmNext = 0; return; }
   if (!bgmNext || bgmNext < AC.currentTime - 0.5) bgmNext = AC.currentTime + 0.05;
-  const step = 60 / (150 + speed * 0.8) / 2;
+  const step = 60 / (150 + G.speed * 0.8) / 2;
   while (bgmNext < AC.currentTime + 0.15) {
     const m = MEL[bgmStep % MEL.length];
     if (m) tone(m, bgmNext, step * 0.9, 'square', 0.07);
@@ -131,30 +134,20 @@ function bgmTick(active) {
 }
 addEventListener('keydown', e => { if (e.code === 'KeyM') muted = !muted; initAudio(); });
 
-let state = 'title', stage = 1, score = 0, lives = 3;
+let state = 'title';   // title · play · pause · clear · over (게임 중에는 규칙의 st.phase 를 따른다)
+let G = L.newGame();     // 타이틀 화면 뒤에 깔아둘 판
+G.events.length = 0;
 // 최고 점수: 로비 카드와 '내 기록' 요약이 읽는다 (새 기록이 나오는 순간 바로 저장해서 중간에 나가도 남는다)
 const BEST_KEY = 'antarcticBest';
 let best = 0;
 try { best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch (_) {}
 function saveBest() {
-  if (score <= best) return;
-  best = score;
+  if (G.score <= best) return;
+  best = G.score;
   try { localStorage.setItem(BEST_KEY, String(best)); } catch (_) {}
 }
-let dist, speed, px, jy, jv, time, goal, objs, hitT, msgT, msg, flash, hintT;
+let msgT = 0, msg = '', flash = 0;
 
-function startStage() {
-  dist = 0; speed = 0; px = 0; jy = 0; jv = 0; hitT = 0; flash = 0; hintT = stage === 1 ? 4 : 0;
-  goal = 1200 + stage * 300;
-  time = 45 + stage * 5;
-  objs = [];
-  for (let z = 60; z < goal - 60; z += 12 + Math.random() * 25) {
-    const r = Math.random();
-    const type = r < 0.45 ? 'crack' : r < 0.75 ? 'seal' : 'flag';
-    objs.push({ type, z, x: (Math.random() * 1.8 - 0.9), w: type === 'crack' ? 0.22 + Math.random() * 0.2 : 0.18, got: false });
-  }
-  state = 'play';
-}
 // 일시정지: 버튼·P·Esc, 다른 앱이나 탭으로 가면 저절로. 탭·스페이스로 이어서
 function pause() {
   if (state !== 'play') return;
@@ -167,43 +160,27 @@ addEventListener('blur', pause);
 function press() {
   initAudio();
   if (state === 'pause') { resume(); return; }
-  if (state === 'title') { stage = 1; score = 0; lives = 3; startStage(); }
+  if (state === 'title') { G = L.newGame(); state = 'play'; }
   else if (state === 'over') state = 'title';
-  else if (state === 'clear') { stage++; startStage(); }
-  else if (state === 'play' && jy === 0 && hitT <= 0) { jv = 9; sfx.jump(); }
+  else if (state === 'clear') { L.nextStage(G); state = 'play'; }
+  else if (state === 'play' && L.jump(G)) sfx.jump();
+  G.events.length = 0;
 }
 
 function update(dt) {
   bgmTick(state === 'play');
   if (state !== 'play') return;
-  const prevSec = Math.ceil(time);
-  time -= dt;
-  if (time < 10 && Math.ceil(time) < prevSec && time > 0) sfx.tick();
-  const maxV = 55 + stage * 3;
-  if (keys.ArrowUp) speed += 30 * dt; else if (keys.ArrowDown) speed -= 45 * dt; else speed += 8 * dt;
-  speed = Math.max(12, Math.min(maxV, speed));
-  if (hitT > 0) { hitT -= dt; speed = Math.min(speed, 12); }
-  if (touchPx !== null) {
-    px += (touchPx - px) * Math.min(1, dt * 16); // 드래그 목표로 부드럽게 추적
-  } else {
-    const steer = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
-    px = Math.max(-1, Math.min(1, px + steer * 1.4 * dt));
-  }
-  if (jy > 0 || jv > 0) { jy += jv * dt; jv -= 24 * dt; if (jy <= 0) { jy = 0; jv = 0; } }
-  dist += speed * dt;
-
-  for (const o of objs) {
-    const d = o.z - dist;
-    if (o.got || d > 0.6 || d < -0.6) continue;
-    if (Math.abs(o.x - px) > o.w) continue;
-    if (o.type === 'flag') { o.got = true; score += 200; say('+200'); sfx.flag(); }
-    else if (jy < 0.5 && hitT <= 0) { o.got = true; hitT = 1.2; flash = 0.3; say(o.type === 'crack' ? '으앗! 크레바스' : '바다표범!'); score = Math.max(0, score - 100); lives--; sfx.hit();
-      if (lives <= 0) { state = 'over'; sfx.over(); return; } }
+  L.update(G, dt, { up: keys.ArrowUp, down: keys.ArrowDown, left: keys.ArrowLeft, right: keys.ArrowRight, target: touchPx });
+  state = G.phase;
+  for (const e of G.events.splice(0)) {
+    if (e.type === 'tick') sfx.tick();
+    else if (e.type === 'flag') { say('+' + L.FLAG_SCORE); sfx.flag(); }
+    else if (e.type === 'hit') { flash = 0.3; say(e.kind === 'crack' ? '으앗! 크레바스' : '바다표범!'); sfx.hit(); }
+    else if (e.type === 'timeout') { flash = 0.5; if (G.lives > 0) sfx.life(); }
+    else if (e.type === 'over') sfx.over();
+    else if (e.type === 'clear') sfx.clear();
   }
   if (msgT > 0) msgT -= dt;
-  if (hintT > 0) hintT -= dt;
-  if (time <= 0) { lives--; flash = 0.5; if (lives <= 0) { state = 'over'; sfx.over(); } else { sfx.life(); startStage(); } }
-  else if (dist >= goal) { score += Math.floor(time) * 50 + 1000; state = 'clear'; sfx.clear(); }
 }
 function say(t) { msg = t; msgT = 1; }
 
@@ -211,7 +188,7 @@ function say(t) { msg = t; msgT = 1; }
 const INK = '#2b1d52';
 const FONT = '"Jua", "Apple SD Gothic Neo", sans-serif';
 function proj(d) { return 1 / (1 + d * K); }
-const LANE = 230; // px=±1 이 화면 안(중앙에서 230px)에 머물도록
+const LANE = 230; // G.px=±1 이 화면 안(중앙에서 230px)에 머물도록
 function sx(x, s) { return W / 2 + x * LANE * s; }
 function sy(s) { return HOR + (GY - HOR) * s; }
 
@@ -231,12 +208,12 @@ function panel(x, y, w, h, r, fill, lift = 4) {
   ctx.lineWidth = 3; ctx.strokeStyle = INK; roundRect(x, y, w, h, r); ctx.stroke();
 }
 function text(t, x, y, size, col = '#fff', align = 'center', stroke = INK) {
-  ctx.font = `${size}px ${FONT}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  ctx.font = `${size}G.px ${FONT}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   if (stroke) { ctx.lineWidth = Math.max(3, size * 0.22); ctx.strokeStyle = stroke; ctx.strokeText(t, x, y); }
   ctx.fillStyle = col; ctx.fillText(t, x, y);
 }
 function emoji(e, x, y, size) {
-  ctx.font = `${size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.font = `${size}G.px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000'; ctx.fillText(e, x, y);
 }
 // 테두리 두른 뭉게구름
@@ -276,13 +253,13 @@ function drawSky(scroll) {
 }
 
 function drawBg() {
-  drawSky(px);
+  drawSky(G.px);
   // 얼음 줄무늬 (멀수록 촘촘하게)
   for (let y = HOR + 2; y < H; y++) {
     const s = (y - HOR) / (GY - HOR);
     if (s <= 0) continue;
     const d = (1 / s - 1) / K;
-    const band = Math.floor((d + dist) / 5) & 1;
+    const band = Math.floor((d + G.dist) / 5) & 1;
     ctx.fillStyle = band ? '#f6fcff' : '#d7eefb';
     ctx.fillRect(0, y, W, 1);
   }
@@ -298,7 +275,7 @@ function drawBg() {
 }
 
 function drawObj(o) {
-  const d = o.z - dist;
+  const d = o.z - G.dist;
   if (d < -1 || d > 120) return;
   const s = proj(Math.max(d, 0)), X = sx(o.x, s), Y = sy(s);
   const lw = Math.max(1.2, 3 * s);
@@ -335,7 +312,7 @@ function drawObj(o) {
 }
 
 function drawStation() {
-  const d = goal - dist; if (d > 120) return;
+  const d = G.goal - G.dist; if (d > 120) return;
   const s = proj(Math.max(d, 0)), Y = sy(s), k = 220 * s, lw = Math.max(1.5, 4 * s);
   ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.lineJoin = 'round';
   // 벽
@@ -355,12 +332,12 @@ function drawStation() {
 }
 
 function drawPenguin() {
-  const X = sx(px, 1), Y = GY - jy * 40;
-  const t = performance.now() / 1000, wob = state === 'play' && jy === 0 ? Math.sin(t * speed * 0.35) * 4 : 0;
+  const X = sx(G.px, 1), Y = GY - G.jy * 40;
+  const t = performance.now() / 1000, wob = state === 'play' && G.jy === 0 ? Math.sin(t * G.speed * 0.35) * 4 : 0;
   ctx.fillStyle = 'rgba(43,29,82,.3)';
-  const sh = Math.max(0.5, 1 - jy / 3);
+  const sh = Math.max(0.5, 1 - G.jy / 3);
   ctx.beginPath(); ctx.ellipse(X, GY + 4, 28 * sh, 7 * sh, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.save(); ctx.translate(X, Y); if (hitT > 0) ctx.rotate(Math.sin(t * 30) * 0.3);
+  ctx.save(); ctx.translate(X, Y); if (G.hitT > 0) ctx.rotate(Math.sin(t * 30) * 0.3);
   ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.lineJoin = 'round';
   // 발
   ctx.fillStyle = '#ffa42b';
@@ -385,22 +362,22 @@ function drawPenguin() {
 function hud() {
   // 스테이지·점수 (왼쪽), 시간·목숨 (오른쪽), 가운데에 남은 거리 막대
   panel(10, 10, 96, 30, 15, '#ffffff', 3);
-  text(`STAGE ${stage}`, 58, 25, 16, INK, 'center', null);
+  text(`STAGE ${G.stage}`, 58, 25, 16, INK, 'center', null);
   panel(10, 48, 132, 32, 16, '#ffd23f', 3);
   emoji('⭐', 28, 64, 16);
-  text(score.toLocaleString(), 90, 64, 20, '#fff');
-  panel(W - 118, 10, 108, 30, 15, time < 10 ? '#ffd0da' : '#ffffff', 3);
+  text(G.score.toLocaleString(), 90, 64, 20, '#fff');
+  panel(W - 118, 10, 108, 30, 15, G.time < 10 ? '#ffd0da' : '#ffffff', 3);
   emoji('⏰', W - 100, 25, 16);
-  text(`${Math.max(0, Math.ceil(time))}`, W - 50, 25, 19, time < 10 ? '#ff3b5c' : INK, 'center', time < 10 ? INK : null);
+  text(`${Math.max(0, Math.ceil(G.time))}`, W - 50, 25, 19, G.time < 10 ? '#ff3b5c' : INK, 'center', G.time < 10 ? INK : null);
   panel(W - 118, 48, 108, 30, 15, '#ffffff', 3);
-  for (let i = 0; i < Math.min(lives, 5); i++) emoji('🐧', W - 100 + i * 20, 63, 16);
+  for (let i = 0; i < Math.min(G.lives, 5); i++) emoji('🐧', W - 100 + i * 20, 63, 16);
   // 거리 막대 + 깃발
   panel(W / 2 - 110, 12, 220, 18, 9, '#ffffff', 3);
-  ctx.fillStyle = '#3fa9ff'; roundRect(W / 2 - 107, 15, Math.max(12, 214 * Math.min(1, dist / goal)), 12, 6); ctx.fill();
+  ctx.fillStyle = '#3fa9ff'; roundRect(W / 2 - 107, 15, Math.max(12, 214 * Math.min(1, G.dist / G.goal)), 12, 6); ctx.fill();
   emoji('🏠', W / 2 + 122, 20, 18);
   panel(PAUSE_BTN.x, PAUSE_BTN.y, PAUSE_BTN.w, PAUSE_BTN.h, 12, '#ffffff', 3);
   text(state === 'pause' ? '▶' : 'Ⅱ', PAUSE_BTN.x + PAUSE_BTN.w / 2, PAUSE_BTN.y + PAUSE_BTN.h / 2, 16, INK, 'center', null);
-  text(`${Math.max(0, Math.ceil(goal - dist))}m`, W / 2, 44, 16, '#fff');
+  text(`${Math.max(0, Math.ceil(G.goal - G.dist))}m`, W / 2, 44, 16, '#fff');
 }
 
 function card(y, h) { panel(W / 2 - 190, y, 380, h, 24, '#ffffff', 6); }
@@ -410,7 +387,7 @@ const rotateHint = document.getElementById('rotateHint');
 function updateRotateHint() {
   const portrait = innerHeight > innerWidth;
   const show = TOUCH && portrait && state !== 'play';
-  if (show) { rotateHint.style.top = (cv.getBoundingClientRect().bottom + 26) + 'px'; }
+  if (show) { rotateHint.style.top = (cv.getBoundingClientRect().bottom + 26) + 'G.px'; }
   if ((rotateHint.style.display === 'block') !== show) rotateHint.style.display = show ? 'block' : 'none';
 }
 
@@ -422,7 +399,7 @@ function draw() {
     const g = ctx.createLinearGradient(0, HOR, 0, H);
     g.addColorStop(0, '#f6fcff'); g.addColorStop(1, '#cfe9f7');
     ctx.fillStyle = g; ctx.fillRect(0, HOR + 1.5, W, H);
-    dist = 0; px = 0; jy = 0; hitT = 0; speed = 0;
+    G.dist = 0; G.px = 0; G.jy = 0; G.hitT = 0; G.speed = 0;
     ctx.save(); ctx.translate(-248, 44); drawPenguin(); ctx.restore();   // 안내 카드 왼쪽 옆
     text('남극탐험', W / 2, 100, 70, '#ffd23f');
     text('ANTARCTIC ADVENTURE', W / 2, 150, 18, '#fff');
@@ -443,7 +420,7 @@ function draw() {
     return;
   }
   drawBg(); drawStation();
-  [...objs].sort((a, b) => b.z - a.z).forEach(drawObj);
+  [...G.objs].sort((a, b) => b.z - a.z).forEach(drawObj);
   drawPenguin();
   if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${flash})`; ctx.fillRect(0, 0, W, H); flash -= 0.02; }
   hud();
@@ -456,10 +433,10 @@ function draw() {
   if (touchUI && state === 'play') {
     if (dragId !== null) { // 드래그 중인 손가락 위치 표시
       ctx.lineWidth = 5; ctx.strokeStyle = INK;
-      ctx.beginPath(); ctx.arc(sx(touchPx ?? px, 1), GY + 20, 20, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(sx(touchPx ?? G.px, 1), GY + 20, 20, 0, Math.PI * 2); ctx.stroke();
       ctx.lineWidth = 3; ctx.strokeStyle = '#ffd23f'; ctx.stroke();
     }
-    if (hintT > 0) { ctx.globalAlpha = Math.min(1, hintT); text('드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, H - 18, 17, '#fff'); ctx.globalAlpha = 1; }
+    if (G.hintT > 0) { ctx.globalAlpha = Math.min(1, G.hintT); text('드래그로 이동 · 탭 또는 위로 스와이프로 점프', W / 2, H - 18, 17, '#fff'); ctx.globalAlpha = 1; }
   }
   if (state === 'pause') {
     ctx.fillStyle = 'rgba(43,29,82,.45)'; ctx.fillRect(0, 0, W, H);
@@ -472,13 +449,13 @@ function draw() {
     card(150, 190);
     if (state === 'clear') {
       text('기지 도착!', W / 2, 192, 44, '#ffd23f');
-      text(`시간 보너스 ${Math.floor(time) * 50} + 1000`, W / 2, 240, 20, INK, 'center', null);
-      text(`점수 ${score.toLocaleString()}  ·  최고 ${best.toLocaleString()}`, W / 2, 270, 18, '#6b5c95', 'center', null);
+      text(`시간 보너스 ${Math.floor(G.time) * 50} + 1000`, W / 2, 240, 20, INK, 'center', null);
+      text(`점수 ${G.score.toLocaleString()}  ·  최고 ${best.toLocaleString()}`, W / 2, 270, 18, '#6b5c95', 'center', null);
       text(TOUCH ? '탭해서 다음 스테이지' : '스페이스 · 클릭: 다음 스테이지', W / 2, 310, 17, '#6b5c95', 'center', null);
     } else {
       text('GAME OVER', W / 2, 192, 46, '#ff5fa2');
-      text(`점수 ${score.toLocaleString()}`, W / 2, 245, 26, INK, 'center', null);
-      text(score > 0 && score >= best ? '🏆 최고 기록!' : `최고 기록 ${best.toLocaleString()}`, W / 2, 277, 17, '#ff5fa2', 'center', null);
+      text(`점수 ${G.score.toLocaleString()}`, W / 2, 245, 26, INK, 'center', null);
+      text(G.score > 0 && G.score >= best ? '🏆 최고 기록!' : `최고 기록 ${best.toLocaleString()}`, W / 2, 277, 17, '#ff5fa2', 'center', null);
       text(TOUCH ? '탭해서 처음으로' : '스페이스 · 클릭: 처음으로', W / 2, 310, 17, '#6b5c95', 'center', null);
     }
   }
