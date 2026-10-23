@@ -168,7 +168,7 @@ addEventListener('blur', pause);
 function press() {
   initAudio();
   if (state === 'pause') { resume(); return; }
-  if (state === 'title') { G = L.newGame(); state = 'play'; }
+  if (state === 'title') { G = L.newGame(); state = 'play'; tutorialSignal('start'); }
   else if (state === 'over') state = 'title';
   else if (state === 'clear') { L.nextStage(G); state = 'play'; }
   else if (state === 'play' && L.jump(G)) { sfx.jump(); tutorialSignal('jump'); }
